@@ -5,17 +5,6 @@ Prediction pipeline for the identification of miRNAs from transcriptional signat
 
 Main pipeline of RNA sign
 """
-# %% PATH DETERMINATION 
-# Get the absolute path of the directory where the current script is located
-script_dir = os.path.dirname(os.path.abspath(__file__))
-# Get the path to the project's root directory by going one level up from the /bin directory
-project_root = os.path.dirname(script_dir)
-# Define the base path for scripts and the assumed base path for models
-SCRIPTS_PATH = os.path.join(project_root, "res", "prediction")
-# Define the directory where the models (GNN weights, Scaler, Classifier) are stored
-MODEL_BASE_DIR = os.path.join(project_root, "res")
-
-
 # %% IMPORTS - Core Libraries
 import argparse
 import os
@@ -39,6 +28,16 @@ except ImportError as e:
 
 import torch._dynamo
 torch._dynamo.config.suppress_errors = True
+
+# %% PATH DETERMINATION 
+# Get the absolute path of the directory where the current script is located
+script_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the path to the project's root directory by going one level up from the /bin directory
+project_root = os.path.dirname(script_dir)
+# Define the base path for scripts and the assumed base path for models
+SCRIPTS_PATH = os.path.join(project_root, "res", "prediction")
+# Define the directory where the models (GNN weights, Scaler, Classifier) are stored
+MODEL_BASE_DIR = os.path.join(project_root, "res")
 
 # %% IMPORTS - Internal Scripts
 

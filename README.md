@@ -5,8 +5,6 @@
 
 # RNAsign Nextflow Pipeline
 
-⚠️ **The NextFlow implementation is still WIP and it is not functional right now, use the scripts located in /bin individually**
-
 An automated Nextflow pipeline for end-to-end identification of functional miRNA regions from BAM files using coverage analysis, machine learning, and quantification.
 
 ## Overview

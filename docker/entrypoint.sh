@@ -9,10 +9,6 @@ ENV_BASE_PATH="/home/micromamba/RNAsign/envs"
 COMMAND="$1"
 
 case "$COMMAND" in
-  cpu)
-    echo "--- Testing python_env_cpu ---"
-    micromamba run -p "${ENV_BASE_PATH}/python_env_cpu" python --version
-    ;;
   gpu)
     echo "--- Testing python_env_gpu ---"
     micromamba run -p "${ENV_BASE_PATH}/python_env_gpu" python --version
@@ -31,15 +27,19 @@ case "$COMMAND" in
     # The 'exec' command replaces the script process with the shell
     exec /bin/bash
     ;;
-  *)
-    # Default action: Print a help message
+  "")
+    # If no command is provided, print help
     echo "Usage: docker run <image> [COMMAND]"
     echo ""
     echo "Commands:"
-    echo "  cpu            Test the python_env_cpu environment."
     echo "  gpu            Test the python_env_gpu environment."
     echo "  bedtools       Test the bedtools_env environment."
     echo "  featurecounts  Test the featurecounts_env environment."
     echo "  bash | shell   Start an interactive bash shell."
+    ;;
+  *)
+    # CRITICAL FIX: Execute any other command passed to the container
+    # This allows Nextflow to run arbitrary commands like 'bedtools genomecov ...'
+    exec "$@"
     ;;
 esac

@@ -6,19 +6,58 @@ log.info """
     =========================
     Input BAMs        : ${params.input_bams}
     Output Dir        : ${params.output_dir}
-    Start From        : ${params.start_from}
-    Stop At           : ${params.stop_at}
-    Run featureCounts : ${params.run_featurecounts}
+    Mode              : ${params.mode}
+    Quantify          : ${params.quantify}
     """
     .trim()
 
 // --- Workflows Definition ---
+
+// ─── Main Workflow ─────────────────────────────────────────────────────────────
+workflow {
+
+
+    // Run workflow based on starting point
+    switch(params.mode) {
+        case 'complete':
+            // Full pipeline: bedtools → aggregation → filter → prediction → (optional) featureCounts
+            bam_ch = Channel.fromPath(params.input_bams)
+            
+            bedtools_out = bedtools_wf(bam_ch)
+            aggregation_out = aggregation_wf(bedtools_out.aggregated_input_ch)
+            filter_out = filter_wf(aggregation_out.filter_input_ch)
+            prediction_out = prediction_wf(filter_out.prediction_input_ch)
+            
+            if (params.run_featurecounts == true) {
+                featurecounts_wf(bedtools_out.bam_ch, prediction_out.final_prediction_output)
+            }
+            break
+        
+        case 'partial':
+            // Partial pipeline: filter → prediction → (optional) featureCounts
+            // It needs a correctly formatted coverage file as input
+            filter_input_ch = Channel.fromPath(params.aggregated_file)
+                .map { file -> tuple(file.simpleName.replaceAll(/_aggregated$/, ''), file) }
+            
+            filter_out = filter_wf(filter_input_ch)
+            prediction_out = prediction_wf(filter_out.prediction_input_ch)
+            
+            if (params.run_featurecounts == true) {
+                bam_ch = Channel.fromPath(params.input_bams)
+                    .map { bam -> tuple(bam.simpleName, bam) }
+                featurecounts_wf(bam_ch, prediction_out.final_prediction_output)
+            }
+            break
+    }
+}
+
+// ─── Sub-Workflows ─────────────────────────────────────────────────────────────
+
 // ─── Bedtools Workflow ─────────────────────────────────────────────────────────
 workflow bedtools_wf {
     take: input_bams
     main:
         bam_ch = input_bams.map { bam -> tuple(bam.simpleName, bam) }
-        bam_ch.view { "BAM: $it[0]" }
 
         def bedtools_variants = [
             ['Total', ''],
@@ -29,12 +68,20 @@ workflow bedtools_wf {
 
         bam_ch
             .combine(bedtools_flags_ch)
-            .map { id_path, flag_list -> tuple(id_path, flag_list) }
             .set { bedtools_input_ch }
 
         run_bedtools(bedtools_input_ch)
 
-        aggregated_input_ch = run_bedtools.out.results.groupTuple()
+        run_bedtools.out.results
+            .groupTuple()  // [sample_id, [file1, file2, file3]]
+            .map { sample_id, files ->
+                // Sort files by name
+                def sorted = files.sort { it.name }
+                // sorted[0] = 3prime, sorted[1] = 5prime, sorted[2] = Total
+                tuple(sample_id, sorted[2], sorted[0], sorted[1])  // Total, 3prime, 5prime
+    }
+    .set { aggregated_input_ch }
+
     emit:
         aggregated_input_ch
         bam_ch
@@ -54,9 +101,8 @@ workflow aggregation_wf {
 workflow filter_wf {
     take:
         filter_input_ch
-        python_env
     main:
-        run_sequence_filter(filter_input_ch, python_env)
+        run_sequence_filter(filter_input_ch)
         prediction_input_ch = run_sequence_filter.out.filtered_file
     emit:
         prediction_input_ch
@@ -66,10 +112,11 @@ workflow filter_wf {
 workflow prediction_wf {
     take:
         prediction_input_ch
-        python_env
     main:
-        run_prediction_script(prediction_input_ch, python_env)
-        final_prediction_output = run_prediction_script.out.prediction_outputs.last()
+        run_prediction_script(prediction_input_ch)
+        final_prediction_output = run_prediction_script.out.prediction_outputs
+            .collect()
+            .map { it.last() }
     emit:
         final_prediction_output
 }
@@ -83,94 +130,28 @@ workflow featurecounts_wf {
         bam_ch.combine(final_prediction_output).set { featurecounts_input_ch }
         run_featurecounts(featurecounts_input_ch)
     emit:
-        run_featurecounts.out
-}
-
-// ─── Main Workflow ─────────────────────────────────────────────────────────────
-workflow {
-    def nametest = "${params.input_bams}"
-    println ">>> Scanning for BAM files in: ${nametest}"
-    Channel
-    .fromPath(nametest)
-    .view { "Found BAM file: $it" }
-
-    // 0. GPU availability
-    platform_ch = check_gpu()
-    def python_env = platform_ch.view().trim() == 'gpu' ? 'python_env_gpu' : 'python_env_cpu'
-
-    // Entry BAM channel
-    bam_ch = Channel.fromPath(params.input_bams)
-
-    // Decide starting point
-    def aggregated_input_ch
-    def filter_input_ch
-    def prediction_input_ch
-    def final_prediction_output
-
-    switch(params.start_from) {
-        case 'bedtools':
-            bedtools_out = bedtools_wf(bam_ch)
-            aggregated_input_ch = bedtools_out.aggregated_input_ch
-            bam_ch = bedtools_out.bam_ch
-            if (params.stop_at == 'bedtools') return
-            // fallthrough
-        case 'aggregation':
-            if (!aggregated_input_ch && params.bedtools_results)
-                aggregated_input_ch = Channel.fromPath(params.bedtools_results)
-            aggregation_out = aggregation_wf(aggregated_input_ch)
-            filter_input_ch = aggregation_out.filter_input_ch
-            if (params.stop_at == 'aggregation') return
-            // fallthrough
-        case 'filter':
-            filter_out = filter_wf(filter_input_ch, python_env)
-            prediction_input_ch = filter_out.prediction_input_ch
-            if (params.stop_at == 'filter') return
-            // fallthrough
-        case ['prediction', 'python']:
-            prediction_out = prediction_wf(prediction_input_ch, python_env)
-            final_prediction_output = prediction_out.final_prediction_output
-            if (params.stop_at == 'prediction') return
-            // fallthrough
-        case 'featurecounts':
-            if (!final_prediction_output && params.prediction_output)
-                final_prediction_output = Channel.fromPath(params.prediction_output)
-            if (params.run_featurecounts)
-                featurecounts_wf(bam_ch, final_prediction_output)
-            return
-    }
+        counts = run_featurecounts.out.counts
+        summary = run_featurecounts.out.summary
 }
 
 
 // --- Process Definitions ---
-process check_gpu {
-    // This process can run in the base container; no special conda env is needed.
-    
-    output:
-    stdout emit: platform_ch // Output the result to a channel
-
-    script:
-    """
-    nvidia-smi &> /dev/null && echo 'gpu' || echo 'cpu'
-    """
-}
 
 process run_bedtools {
     publishDir "${params.output_dir}/bedtools/${sample_id}", mode: 'copy'
 
-    // Conda environment for bedtools from the Docker image
-    conda 'bedtools_env'
-
     input:
-    tuple(val(sample_id), path(bam_file)), tuple(val(name), val(flag))
+    tuple val(sample_id), path(bam_file), val(name), val(flag)
 
     output:
     // Use the descriptive 'name' for the output filename (e.g., sample1.Total.csv)
-    val(sample_id), path("${sample_id}.${name}.csv"), emit: results
+    tuple val(sample_id), path("${sample_id}_${name}.csv"), emit: results
 
     script:
     """
     echo "Running bedtools '${name}' on ${sample_id}"
-    bedtools genomecov -ibam ${bam_file} -dz ${flag} > ${sample_id}.${name}.csv
+    micromamba run -p /home/micromamba/RNAsign/envs/bedtools_env \
+    bedtools genomecov -ibam ${bam_file} -dz ${flag} > ${sample_id}_${name}.csv
     """
 }
 
@@ -178,49 +159,43 @@ process run_aggregation {
     publishDir "${params.output_dir}/aggregated/${sample_id}", mode: 'copy'
 
     input:
-    val(sample_id), path(results) // 
+    tuple val(sample_id), path(total_file), path(prime3_file), path(prime5_file)
 
     output:
     tuple val(sample_id), path("${sample_id}_aggregated.csv"), emit: aggregated_file
 
     script:
     """
-    # NOTE: It's critical that the files are in the correct order for the script.
-    # We then pass them to the script in the order it expects: Total, 3prime, 5prime.
-    # Sorting the files might not be necessary but it is good to ensure consistency.
-    
-    sorted_files=( \$(echo "${results}" | tr ' ' '\\n' | sort) )
-
-    Aggregate.sh \
-        \${sorted_files[2]} \
-        \${sorted_files[0]} \
-        \${sorted_files[1]} \
-        ${sample_id}.aggregated.csv
+    bash ${baseDir}/bin/Aggregate.sh \
+        ${total_file} \
+        ${prime3_file} \
+        ${prime5_file} \
+        ${sample_id}_aggregated.csv
     """
 }
 
 process run_sequence_filter {
     publishDir "${params.output_dir}/filtered/${sample_id}", mode: 'copy'
-    conda python_env
+    
 
     input:
-    val(sample_id), path(aggregated_file)
+    tuple val(sample_id), path(combinedfile)
 
     output:
     tuple val(sample_id), path("${sample_id}_filtered.csv"), emit: filtered_file
 
     script:
     """
-    python ${baseDir}/bin/Chunking.py ${aggregated_file} ${sample_id}_filtered.csv
+    micromamba run -p /home/micromamba/RNAsign/envs/python_env_gpu \
+    python ${baseDir}/bin/Chunking.py ${combinedfile} ${sample_id}_filtered.csv
     """
 }
 
 process run_prediction_script {
-    publishDir "${params.output_dir}/prediction_predictions/${sample_id}", mode: 'copy'
-    conda python_env
+    publishDir "${params.output_dir}/predictions/${sample_id}", mode: 'copy'
 
     input:
-    val(sample_id), path(filtered_file)
+    tuple val(sample_id), path(filtered_file)
 
     output:
     // Use a glob pattern to capture all potential outputs
@@ -228,7 +203,8 @@ process run_prediction_script {
 
     script:
     """
-    Prediction.py -I ${filtered_file} -O . -M TM 
+    micromamba run -p /home/micromamba/RNAsign/envs/python_env_gpu \
+    python ${baseDir}/bin/Prediction.py -I ${filtered_file} -O . -M TM 
     # Rename outputs to match the glob pattern, ensuring a predictable order
     """
 }
@@ -236,11 +212,8 @@ process run_prediction_script {
 process run_featurecounts {
     publishDir "${params.output_dir}/featurecounts", mode: 'copy'
 
-    // Conda environment for featureCounts from the Docker image
-    conda 'featurecounts_env'
-
     input:
-    path(bam_file), path(saf_file)
+    tuple path(bam_file), path(saf_file)
 
     output:
     path "${bam_file.simpleName}_featurecounts.txt", emit: counts
@@ -248,6 +221,7 @@ process run_featurecounts {
 
     script:
     """
+    micromamba run -p /home/micromamba/RNAsign/envs/featurecounts_env \
     featureCounts -F SAF -a ${saf_file} -o ${bam_file.simpleName}_featurecounts.txt ${bam_file}
     """
 }

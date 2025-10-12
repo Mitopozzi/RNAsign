@@ -6,8 +6,9 @@ import numpy as np
 from tqdm import tqdm
 import argparse
 import sys
+from typing import List
 
-def process_sequence_group(group: pd.DataFrame, stable_size: int, flank_size: int, stability_pct: float, min_coverage_threshold: float) -> list[pd.DataFrame]:
+def process_sequence_group(group: pd.DataFrame, stable_size: int, flank_size: int, stability_pct: float, min_coverage_threshold: float) -> List[pd.DataFrame]:
     """
     Processes a single sequence (e.g., chromosome) to find and extract stable regions.
     

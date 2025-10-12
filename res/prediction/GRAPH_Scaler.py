@@ -22,11 +22,12 @@ import pandas as pd
 import joblib
 import os
 from tqdm import tqdm
+from typing import Union
 
 def scale_features(
     df_features: pd.DataFrame, 
     features_to_scale: list, 
-    save_path: str | None = None
+    save_path: Union[str, None] = None
 ) -> tuple[pd.DataFrame, StandardScaler]:
 
     df_scaled = df_features.copy()

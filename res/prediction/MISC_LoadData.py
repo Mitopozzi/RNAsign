@@ -14,10 +14,10 @@
 """
 import pandas as pd
 from pandas.errors import ParserError
-from typing import Tuple, Optional
+from typing import Tuple, Optional, Union
 import sys
 
-def load_data(file_path: str, **kwargs) -> tuple[pd.DataFrame | None, bool]:
+def load_data(file_path: str, **kwargs) -> tuple[Union[pd.DataFrame, None], bool]:
 
     try:
         df = pd.read_csv(file_path, **kwargs)
