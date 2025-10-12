@@ -187,7 +187,7 @@ process run_sequence_filter {
     script:
     """
     micromamba run -p /home/micromamba/RNAsign/envs/python_env_gpu \
-    python ${baseDir}/bin/Chunking.py ${combinedfile} ${sample_id}_filtered.csv
+    python ${baseDir}/bin/Filtering.py ${combinedfile} ${sample_id}_filtered.csv
     """
 }
 
