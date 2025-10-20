@@ -2,14 +2,18 @@
 nextflow.enable.dsl=2
 
 log.info """
-    RNAsign Processing Pipeline
-    =========================
-    Input BAMs        : ${params.input_bams}
-    Output Dir        : ${params.output_dir}
-    Mode              : ${params.mode}
-    Quantify          : ${params.quantify}
-    """
-    .trim()
+╔═══════════════════════════════════════╗
+║  RNA Sign Pipeline                    ║
+╠═══════════════════════════════════════╣
+║  Profile        : ${workflow.profile}
+║  Container Type : ${workflow.containerEngine ?: 'none'}
+║  Container Image: ${workflow.container ?: 'N/A'}
+╠═══════════════════════════════════════╣
+║  Input BAMs     : ${params.input_bams}
+║  Output Dir     : ${params.output_dir}
+║  Mode           : ${params.mode}
+╚═══════════════════════════════════════╝
+""".stripIndent()
 
 // --- Workflows Definition ---
 
