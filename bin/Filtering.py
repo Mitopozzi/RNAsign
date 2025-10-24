@@ -24,14 +24,36 @@ def process_sequence_group(group: pd.DataFrame, stable_size: int, flank_size: in
     if seq_len < target_len:
         return []
 
-    # 1. Calculate rolling statistics (window=stable_size)
+    # 1a. Calculate rolling statistics (window=stable_size)
     rolling_mean = group['coverage'].rolling(window=stable_size).mean()
     rolling_min = group['coverage'].rolling(window=stable_size).min()
     rolling_max = group['coverage'].rolling(window=stable_size).max()
 
-    # 2. Define stability criteria based on the percentage threshold
+    # 1b. Calculate rolling statistics (window=TARGET_LEN)
+    rolling_mean_full = group['coverage'].rolling(window=target_len).mean()
+    rolling_min_full = group['coverage'].rolling(window=target_len).min()
+    rolling_max_full = group['coverage'].rolling(window=target_len).max()
+
+    # 2a. Define stability criteria based on the percentage threshold
     lower_bound = rolling_mean * (1 - stability_pct)
     upper_bound = rolling_mean * (1 + stability_pct)
+
+    # 2b. Check stability across the FULL target length
+    lower_bound_full = rolling_mean_full * (1 - stability_pct)
+    upper_bound_full = rolling_mean_full * (1 + stability_pct)
+
+    is_stable_full_length = (
+    (rolling_min_full >= lower_bound_full) &
+    (rolling_max_full <= upper_bound_full) &
+    (rolling_mean_full >= min_coverage_threshold)
+    )
+    is_stable_full_length = is_stable_full_length.mask(
+        np.isclose(rolling_mean_full, 0), 
+        np.isclose(rolling_max_full, 0) 
+    )
+    # Check if ANY window of target_len has stable coverage and skip in case it does
+    if is_stable_full_length.any():
+        return []
 
     # 3. Identify stable indices (the right edge of the stable window)
     is_stable = (
